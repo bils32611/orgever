@@ -1,0 +1,226 @@
+<?php
+/**
+ * parent class for tags,notebooks,accounts etc.
+ * 
+ * the most inportant public variable is item_name. the second is tbl but the name of the tbl should be name_tbl (item name = tag so table name tag_tbl)further it can pick settigns from config all prefixed with name_XXX eg tag_len, tag_allowed_max, tag_len etc etc.
+ */
+class MY_Items extends CI_Model{
+//the table name only public var in class
+protected $tbl; 
+protected $item_name;
+protected $item_len;
+protected $item_default;
+protected $item_allowed;
+/**
+ * i have initialized table name and item name here and also provided set function for it..lets see which way i keep.
+ */
+public function __construct(){
+parent::__construct();
+}
+public function initialize($item_name){
+if(empty($item_name)){throw new exception("The item name must be set");}
+//item name has to be on top of set config
+$this->item_name = $item_name;
+$this->tbl = $this->item_name."_tbl";
+$this->setConfigValues();
+}//
+/**
+ * create new item.
+**/        
+public function new_item($item,$user_id){
+//escape the item
+$item = $this->escape_item($item);
+//chq if the incomming item is empty after escape
+if(empty($item)){throw new exception("Please give the item a descriptive alphanumeric name");}
+//chq if the item exist for the same user
+$exists=$this->item_exists($item, $user_id);
+if($exists==true){throw new exception("This item already exist");}
+//if all ok then insert new item and return sucess
+$data['name']=$item;
+$data['type']="user_defined";
+$data['user_id']=$user_id;
+$data['created_at']= date("Y-m-d H:i:s G");
+$data['edited_at']= date("Y-m-d H:i:s G");
+$db_ret = $this->db->insert($this->tbl,$data);
+if($db_ret ==FALSE){throw new Exception("Database error..please try later..");}
+return $this->db->affected_rows(); 
+}//new item functino ends
+/**
+ * get an array and check if all the items belong to a user or not (even 1 item error will return false)however even if a non array is sent it will still chq the single item.
+ * @param type $items_array
+ */
+public function item_exists_array($items_array,$user_id) {
+//even if a non array is 
+if(is_array($items_array)){
+foreach($items_array as $t){
+$ret = $this->item_exists($t,$user_id);
+if($ret==false){return false;}
+}
+}else{
+$ret = $this->item_exists($items_array, $user_id);
+return $ret;
+}
+}//item_exists_array
+public function item_exists($name,$user_id){
+$this->db->select('name')->from($this->tbl)->where('user_id',$user_id)->where('name',$name);
+$q = $this->db->get();
+    if($q->num_rows >= 1){
+      return TRUE;
+    }else{
+      return FALSE;
+    }//end if
+
+}//item exists
+public function escape_item($input){
+//$item_len = "tag_len";
+$input = preg_replace('/ /','_',$input);    
+$input = preg_replace('/[^A-Za-z0-9_]/','',$input);
+if (strlen($input)>$this->item_len){
+$input = substr($input,0,$this->item_len);
+return $input;
+}else{return $input;}
+}//escape item   
+public function no_of_items_total(){
+$ret = $this->db->select('id')->from($this->tbl)->get();
+return $ret->num_rows();
+}//total_items_all
+public function no_of_items_user($user_id){
+$ret = $this->db->select('id')->from($this->tbl)->where('user_id',$user_id)->get();
+return $ret->num_rows();
+}//total_items_all
+public function is_default($name,$user_id){
+$ret = $this->db->select('type')->from($this->tbl)->where('user_id',$user_id)->where('name',$name)->get()->result_array();
+if(count($ret)==0){throw new exception("Cant find the item");}
+if($ret[0]['type']=="default"){return true;}
+else{return false;}
+}//is_default
+///////////////////////////////////////////////////
+public function delete($name,$user_id){
+$def=$this->is_default($name, $user_id);
+if($def==true){throw new exception("Can not delete a default item");}
+$q = $this->db->where('user_id',$user_id)
+->where('name',$name);
+if($q->num_rows()==0){throw new exception("Cant find the item");}
+$ret = $this->db->delete($this->tbl);
+return $this->db->affected_rows(); 
+}//delete
+public function rename($itemold,$itemnew,$user_id){
+$def=$this->is_default($itemold, $user_id);
+if($def==true){throw new exception("Can not rename a default item");}
+if(empty($itemnew)||empty($itemold)){throw new 
+  exception("Tag cant have empty value");}
+$itemnew = $this->escape_item($itemnew);
+//chw again for empty after escape
+if(empty($itemnew)){throw new exception
+("Please provide a descriptive item using alph-numeric values only...");}  
+$item_exist = $this->item_exists($itemold,$user_id);  
+if($item_exist==false){throw new Exception("No such item exist to rename.");}
+//query buffer problem here...
+$data['user_id']=$user_id;
+$data['name']=$itemnew;
+$this->db->select('name')->from($this->tbl)
+->where('user_id',$user_id)->where('name',$itemold);
+$ret = $this->db->update($this->tbl,$data);  
+return $this->db->affected_rows(); 
+}//rename
+/** get arraay of items convert them 2 items str
+ * 
+ * @param type $item_array
+ */
+public function user_items($user_id){
+$items = $this->db->select('name')->from($this->tbl)->where('user_id',$user_id)->get()->result_array();        foreach($items as $item){
+        $user_items[] = $item['name'];    
+        }//end for each
+      return $user_items;
+} //end function
+/**
+ * get array of default items from config and insert it for a user normally when a new user account is being created.incase a user has some default items already then those are skipped so no mater how many times it is run will just add the missing items.
+ * @param type $user_id
+ */
+public  function insertDefaultItemsForUser($user_id){
+$count=0;
+if(empty($this->item_default)||!isset($this->item_default)){$this->setConfigValues();}
+//now loop
+foreach($this->item_default as $t){
+//insert only if it does not exist
+if($this->item_exists($t,$user_id)==FALSE){
+$data['user_id']=$user_id;
+$data['name']=$t;
+$data['type']="default";
+$data['created_at']= date("Y-m-d H:i:s G");
+$data['edited_at']= date("Y-m-d H:i:s G");
+$count++;
+$ret = $this->db->insert($this->tbl,$data);
+}//end if
+}//end foreach
+//fol line will just return last operation which is alwasy 1
+//return $this->db->affected_rows(); 
+return $count;
+}//getDefaultFromConfig
+public function deleteDefaultItemsForUser($user_id){
+$q = $this->db->where('user_id',$user_id)
+->where('type',"default");
+$ret = $this->db->delete($this->tbl);
+return $this->db->affected_rows(); 
+}//InsertDefaultForUser
+public function deleteUserDefinedItemsForUser($user_id){
+$q = $this->db->where('user_id',$user_id)
+->where('type',"user_defined");
+$ret = $this->db->delete($this->tbl);
+return $this->db->affected_rows(); 
+}//InsertDefaultForUser
+public function deleteAllItemsUser($user_id){
+$ret1=$this->deleteDefaultItemsForUser($user_id);
+$ret2=$this->deleteUserDefinedItemsForUser($user_id);
+if($ret1==true && $ret2==true){
+return $ret1+ $ret2; 
+}
+}//deleteAllUser
+/**
+ * chq entire table items health: escape_item is used to find undesirable elements and item_len from config for len. it does not fix just generate report.
+ * @return array
+ */
+public function chqItemsHealth(){
+$noOfErrors = 0;
+$errorLog= array();
+$allTags = $this->db->get($this->tbl)->result_array();
+foreach($allTags as $t){
+$t_escaped = $this->escape_item($t['name']);
+if($t_escaped != $t['name']){
+///escape errors
+$error_msg = "ID no".$t['id']."needs to be escaped";
+$noOfErrors = $noOfErrors++;
+array_push($errorLog,$error_msg);
+}
+$item_len= $this->item_len;
+if(!isset($this->item_len)||empty($this->item_len)){throw new exception("Item length not set");}
+///size problems
+if(strlen($t['name'])>$item_len){
+$noOfErrors = $noOfErrors++;
+$error_msg = "Tag id no".$t['id']."is larger than item len";
+array_push($errorLog,$error_msg);
+}
+}//END FOREACH
+$data['$noOfErrors'] = $noOfErrors;
+$data['$errorLog'] = $errorLog;
+return $data;
+}
+/**
+ * get values form config based on the item name.
+ * @param type $item_name
+ */
+public function setConfigValues(){
+if(!isset($this->item_name)){throw new exception('Item name not set');}
+$len = $this->item_name."_len";
+$this->item_len = $this->config->item($len);
+if(empty($this->item_len)){throw new exception('Item length could not be set');}
+$allowed = $this->item_name."_allowed_total";
+$this->item_allowed = $this->config->item($allowed );
+if(empty($this->item_allowed)){throw new exception('Item \"Total numbers allowed\" could not be set');}
+$def = $this->item_name."_default";
+$this->item_default = $this->config->item($def );
+if(empty($this->item_default)){throw new exception('Item length could not be set');}
+return true;
+}//setconfig values
+///////////////////////////////////////////////////
+}//end of class
