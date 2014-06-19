@@ -1,7 +1,7 @@
 <?php if(!isset($_SESSION)){session_start();} 
 if ( ! defined('BASEPATH')) exit('No direct script access allowed');
 
-class Notes extends CI_Model{
+class Note extends CI_Model{
 /**
  * gets raw data for new or edited note and will make it ready to be inserted in DB.
  * 
@@ -19,9 +19,9 @@ class Notes extends CI_Model{
  * 9.insert created at only if new note
  * 10. return data since saving is not this func responsibility
  */
-public function set_new_note_data($user_id){
+public function set_new_note_data($user_id,$data){
 try{
- $data = json_decode($_POST['myJson'], true);  
+ //$data = json_decode($_POST['myJson'], true);  
  //escape note_txt first since after escape it can be empty again.
  $data['note_txt']= $this->escape_new_input($data['note_txt']);
  if(empty($data['note_txt'])){throw new exception("Note cant be empty....please have some substance in it.");}
@@ -30,8 +30,8 @@ try{
   $data['notebook']= $this->escape_new_input($data['notebook']);
 //now see if title and notebook exist or not and take actions
 $data['title']= $this->validate_title($data['title']);  
-//also chq if notebook exists for the user or not
-$data['notebook']= $this->validate_notebook($data['notebook'],$user_id);  
+//just chq for empty notebook dont chq for if user has the note book or not since that cause inter migling of models calling each others
+if(empty($data['notebook'])){$data['notebook']="default";}
 //we should chq if each tag belong to the user but we will not since we can later find orphan tags and notebooks. from admin module
 //now convert the tags array into string after array_unique and then escape them also.
 $data['tags_used'] = $this->validate_tagsused($data['tags_used']);
@@ -216,6 +216,12 @@ $this->db->update('notes_tbl',$data);
 
 public function validate_tagsused($tagsused){
 if(!empty($tagsused)){
+//escape each and every tag individually
+$this->load->model('notes/tags');
+foreach($tagsused as &$tag){
+$tag = $this->tags->escape_item($tag);
+}
+$tagsused = array_filter($tagsused);
 $tagsused = array_unique($tagsused);
 $tagsused = $this->add_tag_sep($tagsused);
 $tagsused = $this->tags_implode($tagsused);
@@ -231,14 +237,7 @@ protected function validate_title($title){
    $title = substr($title, 0, 80); 
     return $title;
   }}//validate_title
-public function validate_notebook($nb,$user_id){
-if(empty($nb)){return "default";}
-else{
-$this->load->model('notebooks');
-$tf = $this->notebooks->item_exists($nb,$user_id);
-if($tf==true){return $nb;}else{return "default";}
-}
-}//
+
  /**
  * chq if note_txt has more char than 16000 then trim it
  * 
