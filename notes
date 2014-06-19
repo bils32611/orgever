@@ -1,0 +1,285 @@
+<?php if(!isset($_SESSION)){session_start();} 
+if ( ! defined('BASEPATH')) exit('No direct script access allowed');
+
+class Notes extends CI_Model{
+/**
+ * gets raw data for new or edited note and will make it ready to be inserted in DB.
+ * 
+ * this raw data can be NEW NOTE or an existing note for EDIT. in both the case the difference is just of one field new_note = true. This function just sets the data does not save(for new note) or update (for edited data)
+ * THE DATA 1:tagsused(array)2:user_id 3:title 4:note_txt 5::notebook 6::new/edited (bool)
+ * requirements 
+ * 1:if note_txt empty exception,
+ * 2:escape all. 
+ * 3:chq if notebook and each tag belong to user, 
+ * 4(userlog in now not responsibility of notes).
+ * 5.if notebook empty then default 
+ * 6.if tags empty do nothing.
+ * 7. if tags exist implode tagsused from array to 1tag#,
+ * 8. insert edited at incase of new or edited
+ * 9.insert created at only if new note
+ * 10. return data since saving is not this func responsibility
+ */
+public function set_new_note_data($user_id){
+try{
+ $data = json_decode($_POST['myJson'], true);  
+ //escape note_txt first since after escape it can be empty again.
+ $data['note_txt']= $this->escape_new_input($data['note_txt']);
+ if(empty($data['note_txt'])){throw new exception("Note cant be empty....please have some substance in it.");}
+//Now escape title and notebooks
+ $data['title']= $this->escape_new_input($data['title']);
+  $data['notebook']= $this->escape_new_input($data['notebook']);
+//now see if title and notebook exist or not and take actions
+$data['title']= $this->validate_title($data['title']);  
+//also chq if notebook exists for the user or not
+$data['notebook']= $this->validate_notebook($data['notebook'],$user_id);  
+//we should chq if each tag belong to the user but we will not since we can later find orphan tags and notebooks. from admin module
+//now convert the tags array into string after array_unique and then escape them also.
+$data['tags_used'] = $this->validate_tagsused($data['tags_used']);
+//noe chq if note is large then trim it
+$data['note_txt'] = substr($data['note_txt'], 0, 16000);
+/////very important to set created at and edited at
+$data['edited_at']= date("Y-m-d H:i:s G");
+//do not RE-set the created at field for edited note
+if($data['new_note']==true){
+$data['created_at']= date("Y-m-d H:i:s G");}
+$data['sucess']=TRUE;
+return $data;
+}catch(Exception $e){
+$ret['sucess']=FALSE;
+$ret['msg']=$e->getMessage();
+return $ret;
+}//exception
+ }//
+ /**
+ * just change notebook to junk.
+ */
+public function delete_note($user_id,$note_id){}//
+/**
+ * return the data for a single note
+ * @param type $user_id
+ * @param type $note_id
+ */
+public function get_note($user_id,$note_id){
+$note = $this->db->select('*')->from('notes_tbl')
+->where('user_id',$user_id)->where('note_id',$note_id)
+->get()->result_array();
+return $note;
+}//
+public function get_notes_all($user_id){
+$ret = $this->db->select('*')->from('notes_tbl')->where('user_id',$user_id)->get()->result_array();
+return $ret;
+}//
+public function get_notes_by_notebook(){
+try{  
+$user_id = $this->authentication_model->check_login();    
+$tag = $_POST['tag'];  
+$sort_order = $_POST['sort_order'];  
+if(empty($tag)||empty($sort_order)){
+    throw new Exception("No value assigned to Tag or Sort Order..");}
+
+$order="";  
+$asc_desc="";  
+switch ($sort_order) {
+    case "title_a-z":
+$order="title";  
+$asc_desc="ASC";  
+        break;
+    case "title_z-a":
+$order="title";  
+$asc_desc="DESC";  
+        break;
+    case "creation_time_a-z":
+$order="created_at";  
+$asc_desc="ASC";  
+        break;
+    case "creation_time_z-a":
+$order="created_at";  
+$asc_desc="DESC";  
+        break;
+    case "edited_a-z":
+$order="edited_on";  
+$asc_desc="ASC";  
+        break;
+    case "edited_z-a":
+$order="edited_on";  
+$asc_desc="DESC";  
+        break;
+}//end of switch  
+$ret = $this->db->select('*')->from('notes_tbl')
+->where('user_id',$user_id)->like('tags_used',$tag)
+->order_by($order,$asc_desc)->get()->result_array();
+return $ret;
+}catch(Exception $e){
+$ret['sucess']=false;  
+$ret['msg']= $e->getMessage();  
+$ret['path']="";  
+return $ret;
+}
+}//notes_by_notebook
+public function get_notes_by_tag(){
+try{  
+$user_id = $this->authentication_model->check_login();    
+$tag = $_POST['tag'];  
+$sort_order = $_POST['sort_order'];  
+if(empty($tag)||empty($sort_order)){
+    throw new Exception("No value assigned to Tag or Sort Order..");}
+
+$order="";  
+$asc_desc="";  
+switch ($sort_order) {
+    case "title_a-z":
+$order="title";  
+$asc_desc="ASC";  
+        break;
+    case "title_z-a":
+$order="title";  
+$asc_desc="DESC";  
+        break;
+    case "creation_time_a-z":
+$order="created_at";  
+$asc_desc="ASC";  
+        break;
+    case "creation_time_z-a":
+$order="created_at";  
+$asc_desc="DESC";  
+        break;
+    case "edited_a-z":
+$order="edited_on";  
+$asc_desc="ASC";  
+        break;
+    case "edited_z-a":
+$order="edited_on";  
+$asc_desc="DESC";  
+        break;
+}//end of switch  
+$ret = $this->db->select('*')->from('notes_tbl')
+->where('user_id',$user_id)->like('tags_used',$tag)
+->order_by($order,$asc_desc)->get()->result_array();
+return $ret;
+}catch(Exception $e){
+$ret['sucess']=false;  
+$ret['msg']= $e->getMessage();  
+$ret['path']="";  
+return $ret;
+}
+}//notes_by_tag
+/**
+ * total no of notes for a user
+ */
+public function get_no_of_notes($user_id){
+$ret = $this->db->select('note_id')->from('notes_tbl')->where('user_id',$user_id)->get();
+return $ret->num_rows();
+}//get_no_of_notes
+/**
+ * search a user notes for keywords
+ * @param type $keyword
+ */
+public function get_note_by_keyword($keyword,$user_id,$sort){}//
+public function delete_notebook($nb){
+$user_id = $this->authentication_model->check_login();  
+$data['user_id']= $user_id;
+$data['notebook']= "default";
+$this->db->select('notebook')->from('notes_tbl')->where('notebook',$nb)->where('user_id',$user_id);
+$ret = $this->db->update('notes_tbl',$data);
+return $ret;
+}//delete_notebook
+public function delete_tagused($tagused){
+$tagused = "#".$tagused."#";  
+$user_id = $this->authentication_model->check_login();  
+$this->db->select('*')->from('notes_tbl')->where('user_id',$user_id)->like('tags_used',$tagused);
+$data= $this->db->get()->result_array();
+////now  put it in DB
+foreach ($data as $d){
+$d['tags_used'] = str_replace($tagused,"",$d['tags_used']);  
+$new['tags_used'] = $d['tags_used'];
+$new['note_id'] = $d['note_id'];
+$this->db->where('note_id', $new['note_id']);
+$this->db->update('notes_tbl', $new); 
+unset($new);
+}//end foreach 
+return TRUE;
+}//delete_tagused
+public function rename_notebook($nb,$user_id){}//
+public function rename_tagused($nb,$user_id){}//
+////////////////////////////////////////////////////////////////////////
+//////////////////NO PUBLIC METHODS BELOW THIS LINE/////////////////////
+////////////////////////////////////////////////////////////////////////
+protected function save_new_note($user_id,$note_data){}//
+protected function save_edited_note($user_id,$note_id,$note_data){
+$owner = $this->authentication_model->is_owner($data['note_id'],$data['user_id']);
+if($owner==true){
+$r = $this->db->where('note_id',$data['note_id'])->where('user_id',$data['user_id']);
+$this->db->update('notes_tbl',$data);   
+ return true;
+}else{return false;}
+}//edited_note_2_DB
+
+public function validate_tagsused($tagsused){
+if(!empty($tagsused)){
+$tagsused = array_unique($tagsused);
+$tagsused = $this->add_tag_sep($tagsused);
+$tagsused = $this->tags_implode($tagsused);
+}else{$tagsused="";}
+return $tagsused;
+}//end validate tagsused
+
+protected function validate_title($title){
+  if(empty($title))
+    { $title="Untitled";
+      return $title;
+  }else{
+   $title = substr($title, 0, 80); 
+    return $title;
+  }}//validate_title
+public function validate_notebook($nb,$user_id){
+if(empty($nb)){return "default";}
+else{
+$this->load->model('notebooks');
+$tf = $this->notebooks->item_exists($nb,$user_id);
+if($tf==true){return $nb;}else{return "default";}
+}
+}//
+ /**
+ * chq if note_txt has more char than 16000 then trim it
+ * 
+ * safely there can be 16000 char in 64kb UTF-8. its still
+ * over 20 pages to store.
+ * * @todo hav a system to log errors and information about 
+ * @param type $note_txt
+ * @return type
+ */ 
+protected function is_note_large($note_txt){
+  if(strlen($note_txt)>16000){
+$note_txt = substr($note_txt, 0, 16000);
+return $note_txt;
+  }else {return $note_txt;}
+} //is_note_large
+protected function prep_tags_4_edit($tags){
+$tags = preg_replace('/!/','<span class="tag_span">',$tags);    
+$tags = preg_replace('/#/','</span>',$tags);    
+return $tags;
+}//prep_tags_4_edit
+public function tags_implode($tags_used){
+if (!empty($tags_used)){
+        $tags_used =implode($tags_used,"");
+return $tags_used;
+}else {return $tags_used;}
+}//tags_implode
+
+public function escape_new_input($input){
+$input = preg_replace('/</','&lt;',$input);    
+$input = preg_replace('/>/','&gt;',$input);    
+return $input;
+}//escape_new_input  
+public function add_tag_sep($data){
+foreach($data as &$d){
+$pattern = $d;
+$pattern =  "!"."$pattern"."#"; 
+$d = $pattern;
+} //end foreach
+return $data;
+}//add_tag_sep
+////////////////////////////////////////////////////////////////////////
+}//CLASS ENDS/////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+?>
